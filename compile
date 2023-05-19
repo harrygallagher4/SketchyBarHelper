@@ -1,0 +1,4 @@
+#!/usr/bin/env zsh
+
+clang -std=c99 helper.c $(pkg-config --cflags --libs luajit) -o helper
+
