@@ -523,9 +523,9 @@ end
 -- Main callback handler. This is called by the C helper and should probably
 -- not be called directly.
 function sb.callback(item, event, env)
-  dispatch_calls(callbacks[1])
-  dispatch_calls(nested_get(callbacks, item, 1))
-  dispatch_calls(nested_get(callbacks, item, event))
+  dispatch_calls(callbacks[1], item, event, env)
+  dispatch_calls(nested_get(callbacks, item, 1), item, event, env)
+  dispatch_calls(nested_get(callbacks, item, event), item, event, env)
 end
 
 --

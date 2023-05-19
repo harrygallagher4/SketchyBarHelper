@@ -121,3 +121,9 @@ sb.item("clock", {
 
 sb.update()
 
+sb.register_callback(function(item, event, env)
+  print(item)
+  print(event)
+  print(inspect(env))
+end)
+
