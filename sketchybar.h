@@ -33,6 +33,11 @@ struct mach_server {
   mach_handler* handler;
 };
 
+struct key_value_pair {
+  char* key;
+  char* value;
+};
+
 static struct mach_server g_mach_server;
 static mach_port_t g_mach_port = 0;
 
@@ -50,7 +55,23 @@ static inline char* env_get_value_for_key(env env, char* key) {
   return (char*)"";
 }
 
-static inline mach_port_t mach_get_bs_port() {
+static inline struct key_value_pair env_get_next_key_value_pair(env env, struct key_value_pair prev) {
+  uint32_t caret = 0;
+  if (prev.key != NULL) {
+    caret = (prev.key - env) + strlen(&env[(prev.key - env)])
+                             + strlen(&env[(prev.key - env)
+                                      + strlen(&env[(prev.key - env)])
+                                      + 1                             ])
+                             + 2;
+  }
+
+  if (!env[caret]) return (struct key_value_pair) { NULL, NULL };
+
+  return (struct key_value_pair) { env + caret,
+                                   env + caret + strlen(&env[caret]) +1 };
+}
+
+static inline mach_port_t mach_get_bs_port(char* name) {
   mach_port_name_t task = mach_task_self();
 
   mach_port_t bs_port;
@@ -62,8 +83,8 @@ static inline mach_port_t mach_get_bs_port() {
 
   mach_port_t port;
   if (bootstrap_look_up(bs_port,
-                        "git.felix.sketchybar",
-                        &port                  ) != KERN_SUCCESS) {
+                        name,
+                        &port   ) != KERN_SUCCESS) {
     return 0;
   }
 
@@ -95,6 +116,7 @@ static inline void mach_receive_message(mach_port_t port, struct mach_buffer* bu
   }
 }
 
+char* g_rsp = NULL;
 static inline char* mach_send_message(mach_port_t port, char* message, uint32_t len) {
   if (!message || !port) {
     return NULL;
@@ -140,16 +162,27 @@ static inline char* mach_send_message(mach_port_t port, char* message, uint32_t 
 
   struct mach_buffer buffer = { 0 };
   mach_receive_message(response_port, &buffer, true);
-  if (buffer.message.descriptor.address)
-    return (char*)buffer.message.descriptor.address;
+
+  if (g_rsp) free(g_rsp);
+  g_rsp = NULL;
+  if (buffer.message.descriptor.address) {
+    g_rsp = malloc(strlen(buffer.message.descriptor.address) + 1);
+    memcpy(g_rsp, buffer.message.descriptor.address,
+                strlen(buffer.message.descriptor.address) + 1);
+  } else {
+    g_rsp = malloc(1);
+    *g_rsp = '\0';
+  }
+
   mach_msg_destroy(&buffer.message.header);
 
-  return NULL;
+  return g_rsp;
 }
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-static inline bool mach_server_begin(struct mach_server* mach_server, mach_handler handler, char* bootstrap_name) {
+
+static inline bool mach_server_register(struct mach_server* mach_server, char* bootstrap_name) {
   mach_server->task = mach_task_self();
 
   if (mach_port_allocate(mach_server->task,
@@ -177,6 +210,10 @@ static inline bool mach_server_begin(struct mach_server* mach_server, mach_handl
     return false;
   }
 
+  return true;
+}
+
+static inline bool mach_server_begin(struct mach_server* mach_server, mach_handler handler) {
   mach_server->handler = handler;
   mach_server->is_running = true;
   struct mach_buffer buffer;
@@ -190,7 +227,24 @@ static inline bool mach_server_begin(struct mach_server* mach_server, mach_handl
 }
 #pragma clang diagnostic pop
 
+static char* g_cmd = NULL;
+
 static inline char* sketchybar(char* message) {
+  if (g_cmd && message) {
+    g_cmd = realloc(g_cmd, strlen(g_cmd) + strlen(message) + 2);
+    if (strlen(g_cmd) > 0) {
+      memcpy(g_cmd + strlen(g_cmd) + 1, message, strlen(message) + 1);
+      *(g_cmd + strlen(g_cmd)) = ' ';
+    }
+    else
+       memcpy(g_cmd + strlen(g_cmd), message, strlen(message) + 1);
+
+    return NULL;
+  } else if (g_cmd && !message) {
+    message = g_cmd;
+  }
+
+  // printf("%s\n", message);
   uint32_t message_length = strlen(message) + 1;
   char formatted_message[message_length + 1];
 
@@ -213,15 +267,34 @@ static inline char* sketchybar(char* message) {
   }
 
   formatted_message[caret] = '\0';
-  if (!g_mach_port) g_mach_port = mach_get_bs_port();
-  char* response = mach_send_message(g_mach_port,
-                                     formatted_message,
-                                     caret + 1          );
+  if (!g_mach_port) g_mach_port = mach_get_bs_port("git.felix.sketchybar");
 
-  if (response) return response;
-  else return (char*)"";
+  return mach_send_message(g_mach_port,
+                           formatted_message,
+                           caret + 1          );
 }
 
-static inline void event_server_begin(mach_handler event_handler, char* bootstrap_name) {
-  mach_server_begin(&g_mach_server, event_handler, bootstrap_name);
+static inline void transaction_create() {
+  if (!g_cmd) {
+    g_cmd = malloc(1);
+    *g_cmd = '\0';
+  }
+}
+
+static inline char* transaction_commit() {
+  char* response = NULL;
+  if (g_cmd) {
+    response = sketchybar(NULL);
+    free(g_cmd);
+    g_cmd = NULL;
+  }
+  return response;
+}
+
+static inline void event_server_init(mach_handler event_handler, char* bootstrap_name) {
+  mach_server_register(&g_mach_server, bootstrap_name);
+}
+
+static inline void event_server_run(mach_handler event_handler) {
+  mach_server_begin(&g_mach_server, event_handler);
 }
