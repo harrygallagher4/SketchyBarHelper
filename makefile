@@ -3,13 +3,9 @@ CFLAGS=-std=c99 $(PKG_PATHS)
 PKGS=luajit libcjson
 PKG_PATHS=$(shell pkg-config --cflags --libs $(PKGS))
 SOURCES=$(wildcard *.c) $(wildcard *.h)
-BUILD=./build
 
 LUA_SOURCES = $(wildcard lua/src/*.lua)
-LUA_LIBNAMES = $(notdir $(basename $(LUA_SOURCES)))
-LUA_EMBED_DIR = $(BUILD)/lua_embeds
-LUA_EMBED_HEADERS = $(addprefix $(LUA_EMBED_DIR)/,$(LUA_LIBNAMES))
-.INTERMEDIATE: $(LUA_EMBED_HEADERS)
+LUA_EMBED_NAMES = $(notdir $(basename $(LUA_SOURCES)))
 
 
 ifeq ($(BUILD_TYPE),dev)
@@ -21,17 +17,13 @@ endif
 .PHONY: compile clean clean_lua lua_libcheck
 compile: sb_helper
 
+
 sb_helper: $(SOURCES) lua/libs.h
 	$(CC) $(CFLAGS) helper.c parsing.c -o $@
 
-$(LUA_EMBED_DIR):
-	mkdir -p $(LUA_EMBED_DIR)
-
-$(LUA_EMBED_DIR)/%: lua/src/%.lua
-	xxd -C -i -n lua_lib_$(notdir $@) $^ > $@
-
-lua/libs.h: $(LUA_EMBED_HEADERS) | $(LUA_EMBED_DIR)
-	cat $(LUA_EMBED_HEADERS) > $@
+lua/libs.h: $(LUA_SOURCES)
+	printf "" > $@
+	for f in $(LUA_EMBED_NAMES); do xxd -C -i -n "lua_lib_$$f" "./lua/src/$$f.lua" >> $@; done
 
 
 lua_libcheck:
